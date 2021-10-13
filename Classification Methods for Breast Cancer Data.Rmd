@@ -1,0 +1,212 @@
+---
+title: "Classification Methods for Breast Cancer Data"
+author: "Noah Jones"
+date: "10/12/2021"
+output: pdf_document
+---
+
+# The goal of this project was to compare different classification techniques, namely variations of Logistic Regression and KNN, in terms of effectiveness in predicting whether a patient's breast cancer diagnosis is Malignant or Benign (coded as M and B, respectively) based on data that includes 10 quantitative features of tumors such as radius, perimeter, and area. Data is split into testing and training sets, and misclassification rate of the testing data set is used as to evaluate model effectiveness.
+
+```{r}
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(class)
+library(car)
+```
+
+
+
+# Part 1
+
+## Basic summary statistics.
+
+```{r}
+breastcancer <- read.csv("BreastCancer.csv")
+dim(breastcancer)
+summary(breastcancer)
+```
+
+
+## Graphically identifying three most significant predictors for a patient's diagnosis - i.e., for which predictors is there the least overlap between the Malignant and Benign categories.
+
+```{r}
+ggpairs(data = breastcancer[,c(-1,-2)], aes(color = breastcancer$diagnosis))
+g1 <- ggplot(breastcancer, aes(concave.points_mean, color = diagnosis)) + geom_density()
+g2 <- ggplot(breastcancer, aes(concavity_mean, color = diagnosis)) + geom_density()
+g3 <- ggplot(breastcancer, aes(perimeter_mean, color = diagnosis)) + geom_density()
+grid.arrange(g1,g2,g3, nrow=2)
+```
+
+## Splitting data into testing and training sets, and running K-nearest-neighbor (KNN) classification for k = 1,3,5,7,9, and 11.
+
+```{r}
+set.seed(1128)
+train_indices <- sample(1:nrow(breastcancer), 400, replace = F)
+test_indices <- 1:nrow(breastcancer)
+test_indices <- test_indices[-train_indices]
+predictors <- breastcancer[,c(5,9,10)]
+train_predictors <- predictors[train_indices,]
+test_predictors <- predictors[test_indices,]
+train_outcomes <- breastcancer$diagnosis[train_indices]
+test_outcomes <- breastcancer$diagnosis[test_indices]
+knn_unscaled_results <- vector(mode = "list", length = 6)
+knn_k_values <- c(1,3,5,7,9,11)
+for (i in 1:length(knn_k_values)) {
+  knn_unscaled_results[i] <- list(knn(train_predictors,test_predictors,train_outcomes,k = knn_k_values[i]))
+}
+```
+
+## Reporting misclassification rate for the 6 KNN models.
+
+```{r}
+for(i in 1:length(knn_k_values)){
+  cat("Misclassification Rate for k = ",knn_k_values[i],": ",mean(knn_unscaled_results[[i]] != test_outcomes), "\n", sep = '')
+}
+```
+
+So our best k is 5, which has the lowest misclassification rate.
+
+## Repeating the above analysis after scaling the predictors.
+
+```{r}
+scaled_predictors <- scale(predictors)
+scaled_train_predictors <- scaled_predictors[train_indices,]
+scaled_test_predictors <- scaled_predictors[test_indices,]
+knn_scaled_results <- vector(mode = "list", length = 6)
+for (i in 1:length(knn_k_values)) {
+  knn_scaled_results[i] <- 
+    list(knn(scaled_train_predictors,scaled_test_predictors,train_outcomes,k = knn_k_values[i]))
+}
+```
+
+## Reporting misclassification rates for scaled predictors.
+
+```{r}
+for(i in 1:length(knn_k_values)){
+  cat("Misclassification Rate for k = ",knn_k_values[i],": ",
+      mean(knn_scaled_results[[i]] != test_outcomes), "\n", sep = '')
+}
+```
+
+With scaled predictors, we note that all of our misclassification rates are lower than our "best" k from part d., and also that k = 11 is our best predictor in the scaled case.
+
+# Repeating the above analysis, but including all predictors instead of just the 3 we identified as being "most significant."
+
+```{r}
+all_predictors <- breastcancer[,c(-1,-2)]
+all_train_predictors <- all_predictors[train_indices,]
+all_test_predictors <- all_predictors[test_indices,]
+knn_unscaled_results_all_predictors <- vector(mode = "list", length = 6)
+for (i in 1:length(knn_k_values)) {
+  knn_unscaled_results_all_predictors[i] <- list(knn(all_train_predictors,all_test_predictors,train_outcomes,k = knn_k_values[i]))
+}
+for(i in 1:length(knn_k_values)){
+  cat("Misclassification Rate for all predictors, unscaled, for k = ",knn_k_values[i],": ",mean(knn_unscaled_results_all_predictors[[i]] != test_outcomes), "\n", sep = '')
+}
+```
+
+```{r}
+all_scaled_predictors <- scale(all_predictors)
+all_scaled_train_predictors <- all_scaled_predictors[train_indices,]
+all_scaled_test_predictors <- all_scaled_predictors[test_indices,]
+knn_scaled_results_all_predictors <- vector(mode = "list", length = 6)
+for (i in 1:length(knn_k_values)) {
+  knn_scaled_results_all_predictors[i] <- list(knn(all_scaled_train_predictors,all_scaled_test_predictors,train_outcomes,k = knn_k_values[i]))
+}
+for(i in 1:length(knn_k_values)){
+  cat("Misclassification Rate for all predictors, scaled, for k = ",knn_k_values[i],": ",mean(knn_scaled_results_all_predictors[[i]] != test_outcomes), "\n", sep = '')
+}
+```
+
+In the unscaled case, our "best k" is 7, however the KNN model with all predictors has a higher misclassification rate than the model with only the 3 significant predictors for all k. In the scaled case, our "best k" is also 7, and the KNN model with all predictors has a lower misclassification rate than the model with only the 3 significant predictors for all k except for k = 1, suggesting that using all predictors might yield better results.
+
+
+# Modeling via Logistic Regression
+
+## Running logestic regression model for all numerical predictors, followed by a reporting of confusion matrices and misclassification rates for training and testing data sets.
+
+```{r}
+m1 <- glm(diagnosis~radius_mean+texture_mean+perimeter_mean+area_mean+smoothness_mean
+          +compactness_mean+concavity_mean+concave.points_mean+symmetry_mean
+          +fractal_dimension_mean,data = breastcancer[train_indices,],
+          family = "binomial")
+summary(m1)
+train_logit_probabilities <- predict(m1,type="response")
+test_logit_probabilities <- predict(m1,newdata = breastcancer[test_indices,],type="response")
+train_logit_results <- ifelse(train_logit_probabilities > 0.5, "M", "B")
+test_logit_results <- ifelse(test_logit_probabilities > 0.5, "M", "B")
+```
+
+Training Data Confusion Matrix:
+
+```{r}
+table(train_outcomes,train_logit_results)
+```
+
+Testing Data Confusion Matrix:
+
+```{r}
+table(test_outcomes,test_logit_results)
+```
+
+Misclassification Rates:
+
+```{r}
+mean(train_outcomes!=train_logit_results)
+mean(test_outcomes!=test_logit_results)
+```
+
+## Repeating the above analysis after scaling the predictors.
+
+```{r}
+scaled_breastcancer <- data.frame(breastcancer[,c(1,2)],scale(breastcancer[,c(-1,-2)]))
+m2 <- glm(diagnosis~radius_mean+texture_mean+perimeter_mean+area_mean+smoothness_mean
+          +compactness_mean+concavity_mean+concave.points_mean+symmetry_mean
+          +fractal_dimension_mean,data = scaled_breastcancer[train_indices,],
+          family = "binomial")
+summary(m2)
+train_scaled_logit_probabilities <- predict(m2,type="response")
+test_scaled_logit_probabilities <- predict(m2,newdata = scaled_breastcancer[test_indices,],type="response")
+train_scaled_logit_results <- ifelse(train_scaled_logit_probabilities > 0.5, "M", "B")
+test_scaled_logit_results <- ifelse(test_scaled_logit_probabilities > 0.5, "M", "B")
+```
+
+## Reporting confusion matrices and misclassification rates for scaled data.
+
+Scaled Training Data Confusion Matrix:
+
+```{r}
+table(train_outcomes,train_scaled_logit_results)
+```
+
+
+Scaled Testing Data Confusion Matrix:
+
+```{r}
+table(test_outcomes,test_scaled_logit_results)
+```
+
+Misclassification Rates:
+
+```{r}
+mean(train_outcomes!=train_scaled_logit_results)
+mean(test_outcomes!=test_scaled_logit_results)
+```
+
+
+# Comparing success rates of different models and acknowledging shortcomings of the project, particularly in the multicollinearity of our predictors.
+
+```{r}
+mean(test_logit_probabilities==test_scaled_logit_probabilities)
+mean(test_logit_results==test_scaled_logit_results)
+```
+
+We note that our scaled and unscaled logistic models produced different probabilities, but still yielded the same results with the 0.5 cutoff (see code above).
+
+If we compare the results of the KNN and Logistic regression models off of misclassification rate alone, then the scaled KNN model with all predictors and k = 7 would be our best model, given its misclassification rate of 0.05325444. I am hesitant to say that this is our best possible model, because I believe there is some level of multicollinearity involved with the models which use all predictors. We can see this in our logistic regression models, in which only 3 of our predictors have statistical significance, and also in the VIF function, which shows us some pretty alarmingly large correlation between some of our predictor variables (see code below).
+
+```{r}
+vif(m1)
+```
+
